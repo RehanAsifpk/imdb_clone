@@ -1,4 +1,6 @@
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError
+from rest_framework.permissions import IsAuthenticated
 from watchlist_app.models import WatchList
 from watchlist_app.models import StreamPlatform
 from watchlist_app.models import Review
@@ -11,20 +13,41 @@ from rest_framework import status
 from rest_framework import generics
 from rest_framework import viewsets
 from django.shortcuts import get_object_or_404
+from watchlist_app.api.permissions import AdminOrReadOnly, ReviewUserOrReadOnly
 
 # from rest_framework import mixins
 
 class ReviewCreate(generics.CreateAPIView):
     
     serializer_class=ReviewSerializer
+    
+    def get_queryset(self):
+        return Review.objects.all()
+    
     def perform_create(self, serializer):
         pk=self.kwargs['pk']
         movie=WatchList.objects.get(pk=pk)
-        serializer.save(watchlist=movie)
+        
+        review_user = self.request.user
+        review_queryset=Review.objects.filter(watchlist=movie, review_user=review_user)
+        if review_queryset.exists():
+            raise ValidationError("You have already reviewed this Movie!")
+        
+        if movie.number_rating==0:
+            movie.avg_rating=serializer.validated_data['rating']
+        else:
+            movie.avg_rating=(movie.avg_rating+serializer.validated_data['rating'])/2
+            
+        movie.number_rating=movie.number_rating+1
+        
+        movie.save()
+        
+        serializer.save(watchlist=movie,review_user=review_user)
 
 class ReviewList(generics.ListAPIView):
     # queryset=Review.objects.all()
     serializer_class=ReviewSerializer
+    permission_classes=[IsAuthenticated]
     
     #overriding queryset method
     def get_queryset(self):
@@ -34,7 +57,8 @@ class ReviewList(generics.ListAPIView):
 class ReviewDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset=Review.objects.all()
     serializer_class=ReviewSerializer
-
+    permission_classes=[ReviewUserOrReadOnly]
+    
 # class ReviewDetail(mixins.RetrieveModelMixin,generics.GenericAPIView):
 #     queryset=Review.objects.all()
 #     serializer_class=ReviewSerializer
